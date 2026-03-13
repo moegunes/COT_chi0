@@ -1,0 +1,7 @@
+{
+    "python.analysis.pythonVersion": "3.12",
+    "python.analysis.typeCheckingMode": "basic",
+    "python.analysis.autoSearchPaths": true,
+    "python.defaultInterpreterPath": "/home/gunes/Desktop/research/cot_chi0/.venv/bin/python",
+    "python.REPL.enableREPLSmartSend": false
+}
