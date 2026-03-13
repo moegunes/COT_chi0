@@ -29,7 +29,7 @@ def main():
 
     approximation = 2
 
-    density = get_dens_parallel(system, grid, approximation, full_grid=False)
+    density = get_dens_parallel(system, grid, approximation, full_grid=True)
 
     #plt.style.use("science")
 
