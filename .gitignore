@@ -1,6 +1,15 @@
+scr/__pycache__/
+
+#..
 *.pdf
 archive/
 .venv/
 .vscode/
 
 scr/__pycache__/
+#slurm related
+job*
+
+#outputs in ./
+./*.dat
+cot.out
