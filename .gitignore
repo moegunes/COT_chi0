@@ -2,3 +2,5 @@
 archive/
 .venv/
 .vscode/
+
+scr/__pycache__/
