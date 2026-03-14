@@ -38,6 +38,8 @@ class MaterialConfig:
         k-point sampling array.
     V_ksR : np.ndarray
         Kohn-Sham potential in real space, loaded from file.
+    V_extR : np.ndarray
+        External (local pseudopotential) potential in real space.
     densR_ref : np.ndarray
         Reference charge density in real space, loaded from file.
     n_rgrid : int
@@ -50,6 +52,7 @@ class MaterialConfig:
     a_l: float
     MtR: np.ndarray
     V_ksR: np.ndarray
+    V_extR: np.ndarray
     densR_ref: np.ndarray
     n_rgrid: int
     data_dir: str
@@ -65,6 +68,7 @@ def load_config(
     data_dir: str = "./data/equilibrium",
     vks_file: Optional[str] = None,
     dens_file: Optional[str] = None,
+    vext_file: Optional[str] = None,
 ) -> MaterialConfig:
     """Load material configuration for cubic Helium.
 
@@ -109,6 +113,12 @@ def load_config(
     vks_path = data_path / vks_file
     V_ksR = np.genfromtxt(str(vks_path))
 
+    # --- Load external (local pseudopotential) potential ---
+    if vext_file is None:
+        vext_file = f"VPS_loc_e{ecut}.dat"
+    vext_path = data_path / vext_file
+    V_extR = np.genfromtxt(str(vext_path))
+
     # --- Load reference density ---
     if dens_file is None:
         dens_file = f"density_e{ecut}.dat"
@@ -123,6 +133,7 @@ def load_config(
         a_l=a_l,
         MtR=MtR,
         V_ksR=V_ksR,
+        V_extR=V_extR,
         densR_ref=densR_ref,
         n_rgrid=n_rgrid,
         data_dir=str(data_dir),

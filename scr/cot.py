@@ -1,17 +1,14 @@
 import multiprocessing as mp
+import time
 
 import numpy as np
 
 from .config import MaterialConfig
 from .grid import Grid
-from .heg import chiReal, n_h
+from .heg import chiReal, chiReal_numba, n_h
+from .icot import COT0, COT1, COT1_ALPHA, COT1_AV, COT1_AV_KS, COT1_KS
+from .ks_loop_numba import run_ks_loop_fast
 from .utils import vc_solutions_numba
-
-LRA = -1
-COT0 = 0
-COT1 = 1
-COT1_AV = 2
-COT1_ALPHA = 3
 
 try:
     import numba
@@ -30,45 +27,12 @@ try:
             i = indices[idx]
             v0 = V_ksR[i]
 
-            kF = np.sqrt(-2.0 * (v0 - 1e-10))
-            NF = kF / (2.0 * pi * pi)
-            n_dens = kF * kF * kF / (6.0 * pi * pi)
-            factor = 12.0 * pi * n_dens * NF * 2.0
-            kF2 = 2.0 * kF
-
-            rxi = rx[i]
-            ryi = ry[i]
-            rzi = rz[i]
-
-            # Pre-compute abs differences (thread-local arrays)
-            vx = np.empty(N)
-            vy = np.empty(N)
-            vz = np.empty(N)
-            for j in range(N):
-                vx[j] = abs(rx[j] - rxi)
-                vy[j] = abs(ry[j] - ryi)
-                vz[j] = abs(rz[j] - rzi)
-
             chi_V_sum = 0.0
             chi_sum = 0.0
-
-            for k in range(n_R):
-                Rx = R_list[k, 0]
-                Ry = R_list[k, 1]
-                Rz = R_list[k, 2]
-                for j in range(N):
-                    ddx = vx[j] - Rx
-                    ddy = vy[j] - Ry
-                    ddz = vz[j] - Rz
-                    r = np.sqrt(ddx * ddx + ddy * ddy + ddz * ddz)
-                    u = kF2 * r
-                    denom = kF2 * (r + 1e-15)
-                    denom2 = denom * denom
-                    denom4 = denom2 * denom2
-
-                    chi_val = -factor * (np.sin(u) - u * np.cos(u)) / denom4
-                    chi_V_sum += chi_val * V_ksR[j]
-                    chi_sum += chi_val
+            for j in range(N):
+                chi_val = chiReal_numba(v0, i, j, rx, ry, rz, R_list)
+                chi_V_sum += chi_val * V_ksR[j]
+                chi_sum += chi_val
 
             Vcon = chi_V_sum / chi_sum
             kF_c = np.sqrt(-2.0 * Vcon)
@@ -100,7 +64,8 @@ try:
             elif approximation == COT1_ALPHA:
                 v0_chi = V_ksR[i] / 2.0 + alpha[i] * V_ksR
             else:
-                v0_chi = (V_ksR[i] + V_ksR) / 2.0
+                print("Invalid approximation type in _compute_COT1_av_numba")
+            #    return [np.nan for _ in indices]
 
             kF = np.sqrt(-2.0 * (v0_chi - 1e-10))
             NF = kF / (2.0 * pi * pi)
@@ -219,32 +184,30 @@ def _get_dens_COT1_fast(approximation, system, grid, full_grid):
     else:
         indices = np.asarray(grid.traj, dtype=np.int64)
 
+    args = (np.asarray(V_ksR), rx, ry, rz, R_list, indices)
+
     n_pts = len(indices)
 
     if _HAS_NUMBA:
-        n_threads = numba.config.NUMBA_NUM_THREADS
+        # n_threads = numba.config.NUMBA_NUM_THREADS
+        n_threads = numba.get_num_threads()
         print(f"Processing {n_pts} grid points with Numba ({n_threads} threads)...")
+        start_time = time.perf_counter()
         if approximation == COT1:
-            density_vals = _compute_COT1_numba(
-                np.asarray(V_ksR),
-                grid.rx,
-                grid.ry,
-                grid.rz,
-                grid.R_list,
-                indices,
-            )
-        else:
-            density_vals = _compute_COT1_av_numba(
-                approximation,
-                np.asarray(V_ksR),
-                grid.rx,
-                grid.ry,
-                grid.rz,
-                grid.R_list,
-                indices,
-            )
+            density_vals = _compute_COT1_numba(*args)
+
+        elif approximation in (COT1_AV, COT1_ALPHA):
+            density_vals = _compute_COT1_av_numba(approximation, *args)
+
+        elif approximation in (COT1_AV_KS, COT1_KS):
+            density_vals, history = run_ks_loop_fast(system, grid, approximation)
+
         results = np.zeros(N)
         results[indices] = density_vals
+        end_time = time.perf_counter()
+        elapsed = end_time - start_time
+
+        print(f"Numba computation finished in {elapsed:.3f} seconds")
         return results
 
     # Fallback: shared-memory multiprocessing
@@ -536,3 +499,129 @@ def vc_solutions(v0, numerator):
             "No real solution found for vc. Solutions are: \n"
             + ", \n".join(str(np.round(s, 4)) for s in solutions)
         )
+
+
+def get_dens_ks_loop(
+    system: MaterialConfig,
+    grid: Grid,
+    cot_approximation: int = COT1_AV,
+    n_iter: int = 100,
+    mixing: float = 0.65,
+    n_electrons: float = 2,
+    densR_init=None,
+    convergence_threshold=None,
+    full_grid: bool = True,
+    shift_density: bool = False,
+):
+    """Run a Kohn-Sham self-consistent loop using a COT density functional.
+
+    Instead of diagonalizing the KS Hamiltonian, computes the density
+    from V_KS using a COT approximation at each self-consistent step.
+
+    Parameters
+    ----------
+    system : MaterialConfig
+        Material configuration (must include V_extR).
+    grid : Grid
+        Spatial grid data.
+    cot_approximation : int
+        COT approximation for the density step (COT0, COT1, COT1_AV, etc.).
+    n_iter : int
+        Maximum number of self-consistent iterations.
+    mixing : float
+        Linear mixing: n = mixing * n_COT + (1-mixing) * n_old.
+    n_electrons : float
+        Target number of electrons (2 for He).
+    densR_init : np.ndarray, optional
+        Initial density. If None, uses uniform density.
+    convergence_threshold : float, optional
+        Stop when integral |n_new - n_old| dr < threshold.
+    full_grid : bool
+        Compute density on full grid (True) or trajectory only (False).
+    shift_density : bool
+        If True, shift density for V_xc to conserve electron number
+        (paper Sec. V modified SC-COT). Default False.
+
+    Returns
+    -------
+    densR : np.ndarray
+        Final converged density.
+    history : list of np.ndarray
+        Density at each iteration.
+    """
+    from .ks_loop import run_ks_loop
+
+    return run_ks_loop(
+        system=system,
+        grid=grid,
+        approximation=cot_approximation,
+        n_iter=n_iter,
+        mixing=mixing,
+        n_electrons=2,
+        densR_init=densR_init,
+        convergence_threshold=convergence_threshold,
+        full_grid=full_grid,
+        shift_density=shift_density,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Numba-accelerated KS self-consistent loop
+# ---------------------------------------------------------------------------
+# TODO: once validated, merge get_dens_ks_loop_fast into get_dens_parallel
+#       by adding  COT1_AV_KS = 4  handling inside that function.
+
+
+def get_dens_ks_loop_fast(
+    system: MaterialConfig,
+    grid: Grid,
+    cot_approximation: int = COT1_AV,
+    n_iter: int = 100,
+    mixing: float = 0.65,
+    n_electrons: float = 2,
+    densR_init=None,
+    convergence_threshold=None,
+    full_grid: bool = True,
+    shift_density: bool = False,
+):
+    """Numba-accelerated KS self-consistent loop (drop-in for get_dens_ks_loop).
+
+    Uses ``ks_loop_numba.run_ks_loop_fast`` which pre-computes ``V_ext_G``
+    once and employs numba-compiled LDA, density normalisation, and mixing
+    kernels.  The inner O(N²) density step calls the same
+    ``_compute_COT1_av_numba`` / ``_compute_COT1_numba`` kernels as
+    ``get_dens_parallel``, so results are numerically identical to
+    ``get_dens_ks_loop``.
+
+    Parameters
+    ----------
+    system : MaterialConfig
+    grid : Grid
+    cot_approximation : int
+        COT approximation (COT0=0, COT1=1, COT1_AV=2, COT1_ALPHA=3).
+    n_iter : int
+    mixing : float
+    n_electrons : float
+    densR_init : np.ndarray, optional
+    convergence_threshold : float, optional
+    full_grid : bool
+    shift_density : bool
+
+    Returns
+    -------
+    densR : np.ndarray
+    history : list of np.ndarray
+    """
+    from .ks_loop_numba import run_ks_loop_fast
+
+    return run_ks_loop_fast(
+        system=system,
+        grid=grid,
+        approximation=cot_approximation,
+        n_iter=n_iter,
+        mixing=mixing,
+        n_electrons=2,
+        densR_init=densR_init,
+        convergence_threshold=convergence_threshold,
+        shift_density=shift_density,
+    )

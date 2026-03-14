@@ -11,24 +11,19 @@ Instead of solving the Kohn-Sham (KS) Schrödinger equation to get the electron 
 ## Package Structure
 
 ```
-cot_he_functional/
-├── cot_functional/          # Main Python package
+cot_chi0/
+├── src/                     # Main Python package
 │   ├── config.py            # Material parameters & configuration
 │   ├── grid.py              # Reciprocal/real space grid setup
 │   ├── fourier.py           # FFT routines (ABINIT-compatible)
-│   ├── lda.py               # LDA XC functionals (Perdew-Zunger)
-│   ├── lindhard.py          # Lindhard function (real & reciprocal space)
-│   ├── heg.py               # HEG model: Thomas-Fermi density, v_tilde
-│   ├── connector.py         # Connector potential (all approximation types)
-│   ├── ks_solver.py         # KS Hamiltonian construction & diagonalization
-│   ├── observables.py       # Sphere integral, diagonal slices, MADE
+│   ├── heg.py               # Model properties (density, Lindhard fnc)
+│   ├── cot.py               # Main connector code
 │   └── io.py                # File I/O helpers
 ├── data/                    # Reference data (.dat files)
 │   ├── equilibrium/         # a_l = 8.016 Bohr
 │   ├── compressed/          # a_l < 8.016
 │   ├── isolated/            # Isolated He
 │   └── qe/                  # Quantum ESPRESSO outputs
-├── scripts/                 # Command-line tools
 ├── notebooks/               # Analysis & figure notebooks
 └── tests/                   # Unit tests
 ```

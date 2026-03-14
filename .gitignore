@@ -7,6 +7,7 @@ archive/
 .vscode/
 
 scr/__pycache__/
+.ruff_cache
 #slurm related
 job*
 

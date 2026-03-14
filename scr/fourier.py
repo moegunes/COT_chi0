@@ -1,12 +1,79 @@
+"""
+fourier.py — Fourier transforms between real space and G-space
+================================================================
+
+Vectorized FFT functions for density-like quantities on a cubic grid.
+"""
+
 import sys
 
 import numpy as np
 
 
+def fft_r_to_g(fR, G_dens_int, n_rgrid):
+    """Transform a real-space function to G-space (density-like).
+
+    Parameters
+    ----------
+    fR : np.ndarray, shape (n_rgrid**3,)
+        Function in real space.
+    G_dens_int : np.ndarray, shape (n_G, 3)
+        Integer G-vector indices.
+    n_rgrid : int
+        Grid size per dimension.
+
+    Returns
+    -------
+    np.ndarray, shape (n_G,)
+        Function in G-space at the G_dens_int positions.
+    """
+    n = n_rgrid
+    N = n**3
+    fR3D = fR.reshape(n, n, n)
+    fG3D = np.fft.fftshift(np.fft.fftn(fR3D)) / N
+
+    m = n // 2
+    idx = np.asarray(G_dens_int, dtype=int)
+    # Grid ordering: axis 0→z (Gz), axis 1→y (Gy), axis 2→x (Gx)
+    return fG3D[m + idx[:, 2], m + idx[:, 1], m + idx[:, 0]]
+
+
+def fft_g_to_r(fG, G_dens_int, n_rgrid):
+    """Transform a G-space function to real space (density-like).
+
+    Parameters
+    ----------
+    fG : np.ndarray, shape (n_G,)
+        Function in G-space.
+    G_dens_int : np.ndarray, shape (n_G, 3)
+        Integer G-vector indices.
+    n_rgrid : int
+        Grid size per dimension.
+
+    Returns
+    -------
+    np.ndarray, shape (n_rgrid**3,)
+        Function in real space.
+    """
+    n = n_rgrid
+    N = n**3
+    fG3D = np.zeros((n, n, n), dtype=complex)
+
+    m = n // 2
+    idx = np.asarray(G_dens_int, dtype=int)
+    # Grid ordering: axis 0→z (Gz), axis 1→y (Gy), axis 2→x (Gx)
+    fG3D[m + idx[:, 2], m + idx[:, 1], m + idx[:, 0]] = fG
+
+    fR = np.fft.ifftn(np.fft.ifftshift(fG3D)).ravel() * N
+    return fR
+
+
+# --------------- Legacy functions (kept for backward compatibility) ---------------
+
+
 def myifft_dens_v(
     fR, G_dens_int, rlist, idx=None
 ):  # inverse FT of the density which is different from above because we use more G vectors
-
     n_rgrid1, n_rgrid2, n_rgrid3 = [int(np.round(len(fR) ** (1 / 3)))] * 3
     fR3D = np.reshape(fR, (n_rgrid3, n_rgrid2, n_rgrid1))
     fR3D = fR3D
@@ -49,11 +116,6 @@ def myifft_dens_v(
         )
         if ind <= n_rgrid1 * n_rgrid2 * n_rgrid3:
             fG.append(normalized_fG[ind])  # *np.exp(-1J*np.inner(rvec-r_i,G_dens)) )
-        else:
-            fG.append(0)
-            sys.stdout = open("warning_fft.txt", "a")
-            print("warning", ind, g)
-            sys.stdout.close()
 
         return np.array(fG)
 
