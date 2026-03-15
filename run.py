@@ -26,7 +26,7 @@ def main():
 
     V_ksR = system.V_ksR  # noqa: F841
 
-    approximation = 22
+    approximation = 2
 
     density = get_dens_parallel(system, grid, approximation, full_grid=True)
 

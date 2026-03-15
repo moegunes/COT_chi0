@@ -19,7 +19,6 @@ try:
 
         n_pts = len(indices)
         N = len(V_ksR)
-        n_R = len(R_list)
         results = np.empty(n_pts)
         pi = np.pi
 
@@ -66,7 +65,14 @@ try:
             else:
                 print("Invalid approximation type in _compute_COT1_av_numba")
             #    return [np.nan for _ in indices]
-
+            chi_V_sum = 0.0
+            chi_sum = 0.0
+            """
+            for j in range(N):
+                chi_val = chiReal_numba(v0_chi[j], i, j, rx, ry, rz, R_list)
+                chi_V_sum += chi_val * V_ksR[j]
+                chi_sum += chi_val
+            """
             kF = np.sqrt(-2.0 * (v0_chi - 1e-10))
             NF = kF / (2.0 * pi * pi)
             n_dens = kF * kF * kF / (6.0 * pi * pi)
@@ -108,10 +114,10 @@ try:
                     chi_sum += chi_val
 
             # Fallback to COT1 connector when |v0| is too small for cubic solver
-            if abs(V_ksR[i]) < 1e-3:
-                Vcon = chi_V_sum / chi_sum
-            else:
-                Vcon = vc_solutions_numba(V_ksR[i], chi_V_sum * dvol)
+            # if abs(V_ksR[i]) < 1e-3:
+            #    Vcon = chi_V_sum / chi_sum
+            # else:
+            Vcon = vc_solutions_numba(V_ksR[i], chi_V_sum * dvol)
             kF_c = np.sqrt(-2.0 * Vcon)
             results[idx] = kF_c * kF_c * kF_c / (3.0 * pi * pi)
 
@@ -318,7 +324,6 @@ def get_dens_parallel(
         return n_h(system.V_ksR)
 
     # Fast vectorized path for COT1
-    n_pts = len(grid.rlist) if full_grid else len(grid.traj)
     results = _get_dens_COT1_fast(approximation, system, grid, full_grid)
     print("=" * 42)
     print("SUCCESSFULLY COMPLETED.")

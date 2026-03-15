@@ -34,11 +34,8 @@ def chiReal(v0, i, grid, mu=0):
 def chiReal_numba(v0, i, j, rx, ry, rz, R_list, mu=0):
     pi = np.pi
     n_R = len(R_list)
-    N = len(rx)
     kF = np.sqrt(-2.0 * (v0 - 1e-10))
-    NF = kF / (2.0 * pi * pi)
-    n_dens = kF * kF * kF / (6.0 * pi * pi)
-    factor = 12.0 * pi * n_dens * NF * 2.0
+    factor = 2 * kF**4 / (pi * pi * pi)  # 12.0 * pi * n_dens * NF * 2.0
     kF2 = 2.0 * kF
 
     rxi = rx[i]
