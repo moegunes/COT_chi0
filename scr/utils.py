@@ -23,37 +23,68 @@ def get_rvecs(axes, mesh, center=False):
     return rvecs
 
 
-def get_G(cut, axes, mesh):
+def vc_solutions(v0, numerator):
     """
-    Get G-vectors for a given energy cutoff and grid size.
+    Returns the three solutions for self-consistent vc.
+
+    Notes:
+    - Uses principal branches for complex sqrt and complex cube root (via **(1/3)).
+    - A0, B0 can be real or complex (Python numbers).
     """
-    Ecut = cut
-    n_rgrid1, n_rgrid2, n_rgrid3 = mesh[0], mesh[1], mesh[2]
-    MtR = axes[[2, 1, 0]]
-    Mt = 2 * np.pi * (np.linalg.inv(MtR))
+    import cmath
 
-    G_dens, G_dens_int = [], []
-    qmax2_x = int(n_rgrid1 / 2)  # 2int(np.sqrt(8*Ecut)/np.linalg.norm(Mt[:,0]))*2
-    qmax2_y = int(n_rgrid2 / 2)
-    qmax2_z = int(n_rgrid3 / 2)
-    G_dic = {}
-    count = 0
-    for i in range(-qmax2_x, qmax2_x):
-        for j in range(-qmax2_y, qmax2_y):
-            for k in range(-qmax2_z, qmax2_z):
-                g_orth = np.dot(Mt, [i, j, k])
-                if np.linalg.norm(g_orth) ** 2 / 2 < 4 * Ecut:
-                    # print([i,j,k], '>>' , np.linalg.norm(q+[i,j,k])**2/2)
-                    x = g_orth[0]  # round(g_orth[0],5)
-                    y = g_orth[1]  # round(g_orth[1],5)
-                    z = g_orth[2]  # round(g_orth[2],5)
-                    G_dens.append([x, y, z])
-                    G_dic[str([i, j, k])] = count
-                    G_dens_int.append([i, j, k])
-                    count += 1
+    J = 1j
+    sqrt3 = cmath.sqrt(3)
 
-    gnorm = np.linalg.norm(G_dens, axis=1)  ## useful for connector
-    return gnorm, G_dens, G_dens_int
+    A0 = v0
+    B0 = numerator**2 * np.pi**4
+
+    inner_sqrt = cmath.sqrt(4 * A0**3 * B0 + 27 * B0**2)
+    D = -2 * A0**3 - 27 * B0 + 3 * sqrt3 * inner_sqrt
+
+    # Cube root and 2^(1/3), 2^(2/3)
+    D_cuberoot = (
+        D ** (1 / 3) if not isinstance(D, complex) else cmath.exp(cmath.log(D) / 3)
+    )
+    two_1_3 = 2 ** (1 / 3)
+    two_2_3 = 2 ** (2 / 3)
+
+    # Solution 1:
+    vc1 = (1 / 3) * (-A0 + (two_1_3 * A0**2) / (D_cuberoot) + (D_cuberoot) / (two_1_3))
+
+    # Common complex factors (1 ± i*sqrt(3))
+    w_plus = 1 + J * sqrt3
+    w_minus = 1 - J * sqrt3
+
+    # Solution 2:
+    vc2 = (
+        -(A0 / 3)
+        - (w_plus * A0**2) / (3 * two_2_3 * D_cuberoot)
+        - (w_minus * D_cuberoot) / (6 * two_1_3)
+    )
+
+    # Solution 3:
+    vc3 = (
+        -(A0 / 3)
+        - (w_minus * A0**2) / (3 * two_2_3 * D_cuberoot)
+        - (w_plus * D_cuberoot) / (6 * two_1_3)
+    )
+    # we return only the real root. for this, we need to check which of the three solutions is real (or has the smallest imaginary part)
+    solutions = [vc1, vc2, vc3]
+    real_solutions = [s for s in solutions if abs(s.imag) < 1e-6]
+    if real_solutions:
+        if len(real_solutions) > 1:
+            raise ValueError(
+                "Multiple real solutions found when solving the self-consistent equation for the connector. Solutions are: \n"
+                + ", \n".join(str(np.round(s, 4)) for s in real_solutions)
+            )
+        else:
+            return real_solutions[0].real
+    else:
+        raise ValueError(
+            "No real solution found for vc. Solutions are: \n"
+            + ", \n".join(str(np.round(s, 4)) for s in solutions)
+        )
 
 
 @numba.njit(cache=True, inline="always")

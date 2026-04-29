@@ -5,6 +5,7 @@ scr/__pycache__/
 archive/
 .venv/
 .vscode/
+*.code-workspace
 
 scr/__pycache__/
 .ruff_cache

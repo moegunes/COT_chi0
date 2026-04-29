@@ -109,6 +109,39 @@ if _HAS_NUMBA:
         return result
 
     @numba.njit(cache=True, fastmath=True)
+    def _scale_density_numba(densR, n_electrons, dvol):
+        """Scale density so that its integral equals n_electrons.
+
+        ρ' = ρ * (N_target / N_current)
+        """
+        print("!" * 88)  # noqa: T201
+        print(
+            "!!!!! HACK !!!!!: USING SCALING DENSITY INSTEAD OF NORMALIZATION (for testing)"
+        )  # noqa: T201
+        print("!" * 88)  # noqa: T201
+        n = len(densR)
+        rho = densR.copy()
+
+        # compute current electron count
+        N_current = 0.0
+        for i in range(n):
+            N_current += rho[i]
+        N_current *= dvol
+
+        # avoid division by zero
+        if N_current == 0.0:
+            return rho
+
+        # compute scaling factor
+        scale = n_electrons / N_current
+
+        # apply scaling
+        for i in range(n):
+            rho[i] *= scale
+
+        return rho
+
+    @numba.njit(cache=True, fastmath=True)
     def _normalize_density_numba(densR, n_electrons, dvol):  # pyright: ignore[reportRedeclaration]
         """Shift density to integrate to n_electrons.
 
@@ -248,6 +281,7 @@ def _build_vks_fast(
 
     if shift_density and n_electrons is not None and dvol is not None:
         dens_for_vxc = _normalize_density_numba(densR, n_electrons, dvol)
+        # dens_for_vxc = _scale_density_numba(densR, n_electrons, dvol)
     else:
         dens_for_vxc = np.abs(densR.real)
 
@@ -394,11 +428,11 @@ def run_ks_loop_fast(
         # 2. Shift V_KS so it is all-negative (required by connector maths)
         if approximation != COT0 and V_ksR.max() > 0:
             print("  V_KS exceeds zero. Shifting...")
-            V_ksR = V_ksR - V_ksR.max()
+            V_ksR = V_ksR - V_ksR.max() - 1e-14
 
         # 3. Compute density from V_KS
-        V_ksR_backup = system.V_ksR
-        system.V_ksR = V_ksR
+        # V_ksR_backup = V_ksR #system.V_ksR
+        # system.V_ksR = V_ksR
 
         t0 = time.perf_counter()
         if approximation == COT0:
@@ -413,7 +447,7 @@ def run_ks_loop_fast(
             densR_new = _compute_COT1_av_numba(*args)
         t_dens_total += time.perf_counter() - t0
 
-        system.V_ksR = V_ksR_backup
+        # system.V_ksR = V_ksR_backup
 
         # 4. Mix and compute convergence norm (single numba pass)
         densR, diff = _mix_and_norm_numba(densR_new.real, densR, mixing, dvol)
@@ -478,7 +512,7 @@ def benchmark_density_step(system, grid, approximation, full_grid=True):
     """
     import multiprocessing as mp
 
-    from .cot import _get_dens_COT1_fast
+    from .cot import get_dens_parallel
     from .heg import chiReal, n_h
 
     V_ksR = np.asarray(system.V_ksR)
@@ -528,11 +562,11 @@ def benchmark_density_step(system, grid, approximation, full_grid=True):
     print("[benchmark] Running FAST (numba parallel) ...")
     # First call includes JIT compile time — report both
     t0 = time.perf_counter()
-    fast_density = _get_dens_COT1_fast(approximation, system, grid, full_grid)
+    fast_density = get_dens_parallel(system, grid, approximation, full_grid)
     first_call = time.perf_counter() - t0
 
     t0 = time.perf_counter()
-    fast_density = _get_dens_COT1_fast(approximation, system, grid, full_grid)
+    fast_density = get_dens_parallel(system, grid, approximation, full_grid)
     fast_time = time.perf_counter() - t0
     print(f"  Fast time (1st call incl. JIT): {first_call:.2f}s")
     print(f"  Fast time (2nd call, cached):   {fast_time:.2f}s")
